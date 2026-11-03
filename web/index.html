@@ -1,0 +1,110 @@
+<!doctype html>
+<html lang="es">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Tienda de barrio · demo</title>
+<style>
+  :root{--bg:#faf8f3;--ink:#1f2a24;--muted:#6b756f;--line:#e3ded2;--accent:#2f6b4f;--card:#fff;--err:#b3261e}
+  *{box-sizing:border-box}
+  body{margin:0;font-family:system-ui,sans-serif;background:var(--bg);color:var(--ink)}
+  main{max-width:480px;margin:0 auto;padding:20px 16px 40px}
+  h1{font-size:22px;margin:0 0 4px}
+  p.sub{margin:0 0 20px;color:var(--muted);font-size:14px}
+  .item{display:flex;gap:12px;align-items:center;background:var(--card);border:1px solid var(--line);border-radius:12px;padding:10px;margin-bottom:10px}
+  .item img{width:64px;height:64px;border-radius:8px;object-fit:cover;background:var(--line)}
+  .info{flex:1;min-width:0}
+  .info b{display:block;font-size:15px}
+  .info span{font-size:13px;color:var(--muted)}
+  button{background:var(--accent);color:#fff;border:0;border-radius:8px;padding:10px 12px;font-size:14px;cursor:pointer}
+  button:disabled{background:#b9c4bd;cursor:not-allowed}
+  #estado{font-size:14px;color:var(--muted);padding:12px 0}
+  #estado.error{color:var(--err)}
+  #msg{position:fixed;left:16px;right:16px;bottom:16px;max-width:448px;margin:0 auto;padding:12px 14px;border-radius:10px;background:var(--ink);color:#fff;font-size:14px;display:none}
+  #msg.error{background:var(--err)}
+</style>
+</head>
+<body>
+<main>
+  <h1>Tienda de barrio</h1>
+  <p class="sub">Inventario del día</p>
+  <div id="estado">Cargando productos…</div>
+  <div id="lista"></div>
+</main>
+<div id="msg" role="status"></div>
+
+<script>
+  // ---------- DATOS SIMULADOS (aquí Claude los reemplaza por Supabase) ----------
+  const IMG_BASE = "../data/mock/imagenes/";
+  let productos = [
+    {id:1,nombre:"Arroz 500 g",precio:3200,stock:24,imagen:"arroz.png"},
+    {id:2,nombre:"Leche entera 1 L",precio:4500,stock:12,imagen:"leche.png"},
+    {id:3,nombre:"Huevos x12",precio:9800,stock:8,imagen:"huevos.png"},
+    {id:4,nombre:"Panela 500 g",precio:3800,stock:15,imagen:"panela.png"},
+    {id:5,nombre:"Café molido 250 g",precio:7600,stock:10,imagen:"cafe.png"}
+  ];
+
+  // LECTURA: devuelve los productos
+  async function cargarProductos(){
+    return productos;
+  }
+
+  // ESCRITURA: registra una venta de 1 unidad y descuenta stock
+  async function registrarVenta(producto){
+    producto.stock -= 1; // simulado: solo vive en memoria
+  }
+  // ------------------------------------------------------------------------------
+
+  const $lista = document.getElementById("lista");
+  const $estado = document.getElementById("estado");
+  const $msg = document.getElementById("msg");
+  const cop = n => "$" + Number(n).toLocaleString("es-CO");
+
+  function aviso(texto, error){
+    $msg.textContent = texto;
+    $msg.className = error ? "error" : "";
+    $msg.style.display = "block";
+    setTimeout(()=>{$msg.style.display="none"}, 2500);
+  }
+
+  function pintar(lista){
+    if(!lista.length){ $estado.textContent = "Todavía no hay productos."; $lista.innerHTML=""; return; }
+    $estado.style.display = "none";
+    $lista.innerHTML = lista.map(p => `
+      <div class="item">
+        <img src="${p.imagen.startsWith('http') ? p.imagen : IMG_BASE + p.imagen}" alt="${p.nombre}">
+        <div class="info"><b>${p.nombre}</b><span>${cop(p.precio)} · Stock: ${p.stock}</span></div>
+        <button data-id="${p.id}" ${p.stock<=0?"disabled":""}>Vender 1</button>
+      </div>`).join("");
+  }
+
+  async function iniciar(){
+    try{
+      pintar(await cargarProductos());
+    }catch(e){
+      $estado.className = "error";
+      $estado.textContent = "No se pudo cargar el inventario. Intenta de nuevo.";
+      console.error(e);
+    }
+  }
+
+  $lista.addEventListener("click", async ev => {
+    const btn = ev.target.closest("button[data-id]");
+    if(!btn) return;
+    const p = productos.find(x => x.id == btn.dataset.id);
+    btn.disabled = true;
+    try{
+      await registrarVenta(p);
+      aviso("Venta registrada: " + p.nombre);
+      await iniciar();
+    }catch(e){
+      aviso("No se pudo registrar la venta.", true);
+      console.error(e);
+      btn.disabled = false;
+    }
+  });
+
+  iniciar();
+</script>
+</body>
+</html>
