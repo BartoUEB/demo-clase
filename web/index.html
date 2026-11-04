@@ -18,6 +18,9 @@
   .info span{font-size:13px;color:var(--muted)}
   button{background:var(--accent);color:#fff;border:0;border-radius:8px;padding:10px 12px;font-size:14px;cursor:pointer}
   button:disabled{background:#b9c4bd;cursor:not-allowed}
+  h2{font-size:16px;margin:24px 0 8px}
+  .venta{display:flex;justify-content:space-between;gap:8px;font-size:13px;color:var(--muted);padding:8px 0;border-bottom:1px solid var(--line)}
+  .venta b{color:var(--ink)}
   #estado{font-size:14px;color:var(--muted);padding:12px 0}
   #estado.error{color:var(--err)}
   #msg{position:fixed;left:16px;right:16px;bottom:16px;max-width:448px;margin:0 auto;padding:12px 14px;border-radius:10px;background:var(--ink);color:#fff;font-size:14px;display:none}
@@ -30,33 +33,63 @@
   <p class="sub">Inventario del día</p>
   <div id="estado">Cargando productos…</div>
   <div id="lista"></div>
+  <h2>Últimas ventas</h2>
+  <div id="ventas"></div>
 </main>
 <div id="msg" role="status"></div>
 
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+<script src="config.js"></script>
+<script src="supabase-client.js"></script>
 <script>
-  // ---------- DATOS SIMULADOS (aquí Claude los reemplaza por Supabase) ----------
   const IMG_BASE = "../data/mock/imagenes/";
-  let productos = [
-    {id:1,nombre:"Arroz 500 g",precio:3200,stock:24,imagen:"arroz.png"},
-    {id:2,nombre:"Leche entera 1 L",precio:4500,stock:12,imagen:"leche.png"},
-    {id:3,nombre:"Huevos x12",precio:9800,stock:8,imagen:"huevos.png"},
-    {id:4,nombre:"Panela 500 g",precio:3800,stock:15,imagen:"panela.png"},
-    {id:5,nombre:"Café molido 250 g",precio:7600,stock:10,imagen:"cafe.png"}
-  ];
+  let productos = [];
 
-  // LECTURA: devuelve los productos
+  // LECTURA: devuelve los productos desde Supabase
   async function cargarProductos(){
+    const { data, error } = await getSupabase()
+      .from("productos")
+      .select("id, nombre, precio, stock, imagen")
+      .order("id");
+    if(error) throw error;
+    productos = data;
     return productos;
   }
 
-  // ESCRITURA: registra una venta de 1 unidad y descuenta stock
-  async function registrarVenta(producto){
-    producto.stock -= 1; // simulado: solo vive en memoria
+  // LECTURA: últimas ventas con el nombre del producto
+  async function cargarVentas(){
+    const { data, error } = await getSupabase()
+      .from("ventas")
+      .select("id, cantidad, total, fecha, productos(nombre)")
+      .order("id", { ascending: false })
+      .limit(5);
+    if(error) throw error;
+    return data;
   }
-  // ------------------------------------------------------------------------------
+
+  // ESCRITURA: registra una venta de 1 unidad en ventas y descuenta stock en productos
+  async function registrarVenta(producto){
+    const db = getSupabase();
+    const { error: errVenta } = await db.from("ventas").insert({
+      producto_id: producto.id,
+      cantidad: 1,
+      total: producto.precio,
+      fecha: new Date().toLocaleDateString("en-CA") // YYYY-MM-DD en hora local
+    });
+    if(errVenta) throw errVenta;
+
+    // select() devuelve la fila: si RLS bloquea el UPDATE no hay error, pero llega vacío
+    const { data, error: errStock } = await db.from("productos")
+      .update({ stock: producto.stock - 1 })
+      .eq("id", producto.id)
+      .select();
+    if(errStock) throw errStock;
+    if(!data.length) throw new Error("No se pudo descontar el stock.");
+  }
 
   const $lista = document.getElementById("lista");
   const $estado = document.getElementById("estado");
+  const $ventas = document.getElementById("ventas");
   const $msg = document.getElementById("msg");
   const cop = n => "$" + Number(n).toLocaleString("es-CO");
 
@@ -78,9 +111,26 @@
       </div>`).join("");
   }
 
+  async function pintarVentas(){
+    try{
+      const ventas = await cargarVentas();
+      $ventas.innerHTML = ventas.length
+        ? ventas.map(v => `<div class="venta"><span>${v.fecha} · ${v.cantidad} × ${v.productos ? v.productos.nombre : "Producto"}</span><b>${cop(v.total)}</b></div>`).join("")
+        : "<div class='venta'>Todavía no hay ventas.</div>";
+    }catch(e){
+      $ventas.innerHTML = "<div class='venta' style='color:var(--err)'>No se pudieron cargar las ventas.</div>";
+      console.error(e);
+    }
+  }
+
   async function iniciar(){
+    $estado.className = "";
+    $estado.style.display = "block";
+    $estado.textContent = "Cargando productos…";
+    $lista.innerHTML = "";
     try{
       pintar(await cargarProductos());
+      pintarVentas();
     }catch(e){
       $estado.className = "error";
       $estado.textContent = "No se pudo cargar el inventario. Intenta de nuevo.";
@@ -96,7 +146,8 @@
     try{
       await registrarVenta(p);
       aviso("Venta registrada: " + p.nombre);
-      await iniciar();
+      pintar(await cargarProductos());
+      pintarVentas();
     }catch(e){
       aviso("No se pudo registrar la venta.", true);
       console.error(e);
